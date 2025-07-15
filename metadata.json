@@ -1,0 +1,6 @@
+{
+  "name": "FinanCalc AI",
+  "description": "An intelligent financial calculator that uses AI to analyze problems, create step-by-step plans from a comprehensive formula library, and compute solutions.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
