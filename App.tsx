@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import type { AppResult, Provider, Mode } from './types';
 import { generateCalculationPlan } from './services/geminiService';
 import { executePlan } from './services/calculationEngine';
@@ -23,24 +23,6 @@ const App: React.FC = () => {
     const [results, setResults] = useState<AppResult[] | null>(null);
     const [provider, setProvider] = useState<Provider>('google');
     const [mode, setMode] = useState<Mode>('preciso');
-
-    useEffect(() => {
-        // This check runs once on mount to verify environment variables.
-        const configErrors: string[] = [];
-        if (!process.env.GEMINI_API_KEY) {
-            configErrors.push("Falta la variable de entorno 'GEMINI_API_KEY'.");
-        }
-        if (!process.env.OPENROUTER_KIMI_API_KEY) {
-            configErrors.push("Falta la variable de entorno 'OPENROUTER_KIMI_API_KEY'.");
-        }
-        if (!process.env.OPENROUTER_MISTRAL_API_KEY) {
-            configErrors.push("Falta la variable de entorno 'OPENROUTER_MISTRAL_API_KEY'.");
-        }
-
-        if (configErrors.length > 0) {
-            setError(`Error de Configuración: ${configErrors.join(' ')} Por favor, añada las variables en la configuración de Vercel y haga Redeploy.`);
-        }
-    }, []);
 
     const handleCalculate = useCallback(async () => {
         if (!problemDescription.trim()) {
@@ -70,7 +52,13 @@ const App: React.FC = () => {
             });
 
             const settledResults = await Promise.all(promises);
-            setResults(settledResults);
+            
+            // Check if there's a general error that applies to all, like a network issue before starting.
+            if (settledResults.every(res => res.error)) {
+                 setError(settledResults[0].error); // Show the first error as a general message
+            } else {
+                 setResults(settledResults);
+            }
 
         } catch (e: unknown) {
             console.error(e);
@@ -115,7 +103,7 @@ const App: React.FC = () => {
                     )}
                     
                     {!isLoading && results && (
-                        <div className={`mt-8 ${provider === 'todas' ? 'grid grid-cols-1 lg:grid-cols-1 xl:grid-cols-1 gap-8' : ''}`}>
+                        <div className={`mt-8 ${provider === 'todas' ? 'space-y-8' : ''}`}>
                            {results.map(res => (
                                <div key={res.provider} className={provider === 'todas' ? 'bg-white rounded-xl shadow-md p-6 border' : ''}>
                                    {provider === 'todas' && (
