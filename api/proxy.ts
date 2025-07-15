@@ -13,6 +13,7 @@ export default async function handler(request: Request) {
 
     try {
         const { mode, provider, problem } = await request.json() as { mode: Mode, provider: Provider, problem: string };
+        console.log(`[PROXY] Iniciando para proveedor: ${provider}, modo: ${mode}`);
 
         // Validación de claves de API en el lado del servidor
         if (provider === 'google' && !process.env.GEMINI_API_KEY) {
@@ -26,19 +27,26 @@ export default async function handler(request: Request) {
         }
 
         const systemPrompt = mode === 'preciso' ? PRECISE_SYSTEM_PROMPT : EXPERIMENTAL_SYSTEM_PROMPT;
-        const fullPrompt = `${systemPrompt}\n\nProblema a resolver: "${problem}"`;
+        const userPrompt = `Problema a resolver: "${problem}"`;
 
         let rawJsonText = '';
 
         if (provider === 'google') {
+            console.log('[PROXY] Llamando a Google Gemini API...');
             const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash',
-                contents: fullPrompt,
-                config: { responseMimeType: "application/json" }
+                contents: userPrompt,
+                config: { 
+                    responseMimeType: "application/json",
+                    systemInstruction: systemPrompt
+                }
             });
+            console.log('[PROXY] Respuesta recibida de Gemini.');
             rawJsonText = response.text.trim();
+
         } else if (provider === 'kimi' || provider === 'mistral') {
+            console.log(`[PROXY] Llamando a OpenRouter API para ${provider}...`);
             const apiKey = provider === 'kimi' 
                 ? process.env.OPENROUTER_KIMI_API_KEY 
                 : process.env.OPENROUTER_MISTRAL_API_KEY;
@@ -53,11 +61,15 @@ export default async function handler(request: Request) {
                 },
                 body: JSON.stringify({
                     model: model,
-                    messages: [{ role: 'user', content: fullPrompt }],
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userPrompt }
+                    ],
                     response_format: { type: "json_object" }
                 })
             });
-
+            
+            console.log(`[PROXY] Respuesta recibida de OpenRouter (${provider}). Status: ${response.status}`);
             if (!response.ok) {
                 const errorBody = await response.text();
                 throw new Error(`Error de OpenRouter API (${provider}, ${response.status}): ${errorBody}`);
@@ -72,15 +84,16 @@ export default async function handler(request: Request) {
             throw new Error(`Proveedor '${provider}' no soportado.`);
         }
 
-        // Parseo de JSON
-        const jsonMatch = rawJsonText.match(/```json\n([\s\S]*?)\n```|({[\s\S]*})/);
+        console.log('[PROXY] Procesando y parseando la respuesta JSON...');
+        const jsonMatch = rawJsonText.match(/```json\n([\s\S]*?)\n```|({[\s\S]*})|(\[[\s\S]*\])/);
         if (!jsonMatch) {
-            console.error("Respuesta cruda de la IA:", rawJsonText);
+            console.error("[PROXY] Respuesta cruda de la IA no contiene JSON:", rawJsonText);
             throw new Error("La respuesta de la IA no contiene un objeto JSON válido.");
         }
-        const jsonString = jsonMatch[1] || jsonMatch[2];
+        const jsonString = jsonMatch[1] || jsonMatch[2] || jsonMatch[3];
         const plan = JSON.parse(jsonString) as CalculationPlan;
 
+        console.log('[PROXY] Plan generado exitosamente. Enviando respuesta al cliente.');
         return new Response(JSON.stringify(plan), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -88,7 +101,7 @@ export default async function handler(request: Request) {
 
     } catch (e: unknown) {
         const message = e instanceof Error ? e.message : "Ocurrió un error desconocido en el servidor.";
-        console.error("Error en el Proxy de la API:", message);
+        console.error("[PROXY] Error en el handler:", message);
         return new Response(JSON.stringify({ error: message }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' },
